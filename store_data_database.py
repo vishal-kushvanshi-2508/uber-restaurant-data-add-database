@@ -4,6 +4,8 @@
 from typing import List, Tuple
 import json
 
+from threading import Thread
+
 
 import mysql.connector # Must include .connector
 
@@ -64,16 +66,47 @@ def create_table():
     connection.commit()
     connection.close()
 
-batch_size_length = 1000
-def data_commit_batches_wise(connection, cursor, sql_query : str, sql_query_value: List[Tuple], batch_size: int = batch_size_length ):
+
+
+### using thread
+
+def fun1(sql_query, batch ):
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.executemany(sql_query, batch)
+    connection.commit()
+
+batch_size_length = 100
+def data_commit_batches_wise(sql_query : str, sql_query_value: List[Tuple], batch_size: int = batch_size_length ):
     ## this is save data in database batches wise.
-    batch_count = 0
+    threads = []
     for index in range(0, len(sql_query_value), batch_size):
         batch = sql_query_value[index: index + batch_size]
-        cursor.executemany(sql_query, batch)
-        batch_count += 1
-        connection.commit()
-    return batch_count
+        thread_obj = Thread(target=fun1, args=(sql_query, batch))
+        thread_obj.start()
+        threads.append(thread_obj)
+    for tread_obj in threads:
+        tread_obj.join()
+    return len(threads)
+
+
+
+
+
+#
+# ### without thread
+# batch_size_length = 100
+# def data_commit_batches_wise(sql_query : str, sql_query_value: List[Tuple], batch_size: int = batch_size_length ):
+#     ## this is save data in database batches wise.
+#     connection = get_connection()
+#     cursor = connection.cursor()
+#     batch_count = 0
+#     for index in range(0, len(sql_query_value), batch_size):
+#         batch = sql_query_value[index: index + batch_size]
+#         cursor.executemany(sql_query, batch)
+#         batch_count += 1
+#         connection.commit()
+#     return batch_count
 
 
 def insert_data_in_table(list_data : list):
@@ -134,9 +167,9 @@ def insert_data_in_table(list_data : list):
                         price
                     ))
         try:
-            batch_count = data_commit_batches_wise(connection, cursor, parent_sql, rest_values)
+            batch_count = data_commit_batches_wise(parent_sql, rest_values)
             print("batch size  parent : ", batch_count)
-            batch_count = data_commit_batches_wise(connection, cursor, child_sql, menu_values)
+            batch_count = data_commit_batches_wise(child_sql, menu_values)
             print("batch size  child : ", batch_count)
         except Exception as e:
             print(f"batch can not. Error: {e}")
@@ -152,3 +185,22 @@ def insert_data_in_table(list_data : list):
         print("not show error ")
     finally:
         connection.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

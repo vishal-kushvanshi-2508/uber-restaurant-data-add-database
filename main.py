@@ -22,7 +22,7 @@ def main():
 
         restaurant_detail_list.append(result)
 
-        if len(restaurant_detail_list) >= 500:  # large
+        if len(restaurant_detail_list) >= 1000:  # large
             db_call_count += 1
             insert_data_in_table(list_data=restaurant_detail_list)
             restaurant_detail_list.clear()
