@@ -10,6 +10,20 @@ from threading import Thread
 import mysql.connector # Must include .connector
 
 
+from logging import *
+
+basicConfig(
+    level=DEBUG,
+    format="{lineno} | {asctime} | {name} | {levelname} | {threadName} | {message}",
+    style="{",
+    filename="uber_logging_file.log",
+    filemode="w"
+)
+
+logger = getLogger("uber")
+
+
+
 DB_CONFIG = {
     "host" : "localhost",
     "user" : "root",
@@ -19,11 +33,16 @@ DB_CONFIG = {
 }
 
 def get_connection():
-    ## here ** is unpacking DB_CONFIG dictionary.
-    connection = mysql.connector.connect(**DB_CONFIG)
-    ## it is protect to autocommit
-    connection.autocommit = False
-    return connection
+    try:
+        ## here ** is unpacking DB_CONFIG dictionary.
+        connection = mysql.connector.connect(**DB_CONFIG)
+        ## it is protect to autocommit
+        connection.autocommit = False
+        logger.info("Database connection established")
+        return connection
+    except Exception as e:
+        logger.error(f"Database connection failed: {e}")
+        raise
 
 def create_db():
     connection = get_connection()
@@ -37,49 +56,76 @@ def create_db():
 def create_table():
     connection = get_connection()
     cursor = connection.cursor()
+    try:
+        logger.info("Starting table creation")
+        table_queries = {
+            "restaurant_detail": """
+                CREATE TABLE IF NOT EXISTS restaurant_detail( 
+                id INT AUTO_INCREMENT PRIMARY KEY, 
+                restaurant_id VARCHAR(300) UNIQUE, 
+                restaurant_name VARCHAR (300), 
+                image_url TEXT, 
+                location TEXT, 
+                timeing TEXT );
+            """,
+            "category_detail": """
+                CREATE TABLE IF NOT EXISTS category_detail( 
+                id INT AUTO_INCREMENT PRIMARY KEY, 
+                restaurant_id VARCHAR(100),
+                categories_id VARCHAR(150), 
+                categories_name VARCHAR(150), 
+                item_id VARCHAR(150) UNIQUE , 
+                item_name VARCHAR(150) NOT NULL,  
+                image_url TEXT, 
+                description TEXT , 
+                price VARCHAR(170) ,
+                INDEX idx_restaurant_id (restaurant_id), 
+                CONSTRAINT fk_restaurant
+                FOREIGN KEY (restaurant_id) REFERENCES restaurant_detail(restaurant_id) 
+                ON DELETE CASCADE  );
+            """
+        }
+        for table_name, query in table_queries.items():
+            logger.info("Creating table: %s", table_name)
+            # optional (only visible if log level DEBUG)
+            logger.debug("Executing query: %s", query.strip())
 
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS restaurant_detail( 
-            id INT AUTO_INCREMENT PRIMARY KEY, 
-            restaurant_id VARCHAR(300) UNIQUE, 
-            restaurant_name VARCHAR (300), 
-            image_url TEXT, 
-            location TEXT, 
-            timeing TEXT );
-            """)
-    cursor.execute("""
-            CREATE TABLE IF NOT EXISTS category_detail( 
-            id INT AUTO_INCREMENT PRIMARY KEY, 
-            restaurant_id VARCHAR(100),
-            categories_id VARCHAR(150), 
-            categories_name VARCHAR(150), 
-            item_id VARCHAR(150) UNIQUE , 
-            item_name VARCHAR(150) NOT NULL,  
-            image_url TEXT, 
-            description TEXT , 
-            price VARCHAR(170) ,
-            INDEX idx_restaurant_id (restaurant_id), 
-            CONSTRAINT fk_restaurant
-            FOREIGN KEY (restaurant_id) REFERENCES restaurant_detail(restaurant_id) 
-            ON DELETE CASCADE  );
-            """)
-    connection.commit()
-    connection.close()
+            cursor.execute(query)
 
+        connection.commit()
+        logger.info("All tables checked/created successfully")
+    except Exception as e:
+        logger.exception("Table creation failed")
+        if connection:
+            connection.rollback()
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
 
 
 ### using thread
 
 def fun1(sql_query, batch ):
-    connection = get_connection()
-    cursor = connection.cursor()
-    cursor.executemany(sql_query, batch)
-    connection.commit()
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        cursor.executemany(sql_query, batch)
+        connection.commit()
+    except Exception as e:
+        logger.error(f"Batch insert failed error={e}")
 
 batch_size_length = 100
 def data_commit_batches_wise(sql_query : str, sql_query_value: List[Tuple], batch_size: int = batch_size_length ):
     ## this is save data in database batches wise.
     threads = []
+    logger.info(
+        f"Starting batch processing total_records={len(sql_query_value)}"
+    )
+    logger.info(
+        f"Sql query : {sql_query.strip()}"
+    )
     for index in range(0, len(sql_query_value), batch_size):
         batch = sql_query_value[index: index + batch_size]
         thread_obj = Thread(target=fun1, args=(sql_query, batch))
@@ -87,6 +133,8 @@ def data_commit_batches_wise(sql_query : str, sql_query_value: List[Tuple], batc
         threads.append(thread_obj)
     for tread_obj in threads:
         tread_obj.join()
+    logger.info(f"Completed batch processing threads={len(threads)}")
+
     return len(threads)
 
 
@@ -168,9 +216,11 @@ def insert_data_in_table(list_data : list):
                     ))
         try:
             batch_count = data_commit_batches_wise(parent_sql, rest_values)
-            print("batch size  parent : ", batch_count)
+            logger.info(f"Parent batches executed count={batch_count}")
+            # print("batch size  parent : ", batch_count)
             batch_count = data_commit_batches_wise(child_sql, menu_values)
-            print("batch size  child : ", batch_count)
+            logger.info(f"Child batches executed count={batch_count}")
+            # print("batch size  child : ", batch_count)
         except Exception as e:
             print(f"batch can not. Error: {e}")
 
@@ -180,9 +230,10 @@ def insert_data_in_table(list_data : list):
     except Exception as e:
         ## this exception execute when error occur in try block and rollback until last save on database .
         connection.rollback()
-        print(f"Transaction failed, rolled back. Error: {e}")
+        # print(f"Transaction failed, rolled back. Error: {e}")
+        logger.exception("Transaction failed. Rolling back")
     except:
-        print("not show error ")
+        print("except error raise ")
     finally:
         connection.close()
 
