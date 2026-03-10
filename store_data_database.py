@@ -1,26 +1,42 @@
 
 
-
 from typing import List, Tuple
 import json
-
+import re
 from threading import Thread
-
 
 import mysql.connector # Must include .connector
 
 
-from logging import *
+import logging
 
-basicConfig(
-    level=DEBUG,
-    format="{lineno} | {asctime} | {name} | {levelname} | {threadName} | {message}",
-    style="{",
-    filename="uber_logging_file.log",
-    filemode="w"
+# formatter
+formatter = logging.Formatter(
+    "{lineno} | {asctime} | {name} | {levelname} | {threadName} | {message}",
+    style="{"
 )
 
-logger = getLogger("uber")
+# -------- Logger 1 --------
+logger = logging.getLogger("uber")
+logger.setLevel(logging.DEBUG)
+uber_handler = logging.FileHandler("uber_logging_file.log", mode="w", encoding="utf-8")
+uber_handler.setFormatter(formatter)
+
+logger.addHandler(uber_handler)
+
+
+# -------- Logger 2 --------
+db_file = logging.getLogger("database")
+db_file.setLevel(logging.DEBUG)
+
+db_handler = logging.FileHandler("database_log_file.log", mode="w", encoding="utf-8")
+db_handler.setFormatter(formatter)
+
+db_file.addHandler(db_handler)
+
+# -------- Test --------
+# logger.info("Uber logger started")
+# db_file.info("Database logger started")
 
 
 
@@ -86,12 +102,11 @@ def create_table():
             """
         }
         for table_name, query in table_queries.items():
-            logger.info("Creating table: %s", table_name)
-            # optional (only visible if log level DEBUG)
-            logger.debug("Executing query: %s", query.strip())
-
+            query_without_enter =  " ".join(query.split())
+            db_file.info(
+                query_without_enter
+            )
             cursor.execute(query)
-
         connection.commit()
         logger.info("All tables checked/created successfully")
     except Exception as e:
@@ -105,6 +120,7 @@ def create_table():
             connection.close()
 
 
+
 ### using thread
 
 def fun1(sql_query, batch ):
@@ -112,6 +128,12 @@ def fun1(sql_query, batch ):
         connection = get_connection()
         cursor = connection.cursor()
         cursor.executemany(sql_query, batch)
+        values = ", ".join(str(t_data) for t_data in batch)
+        recovery_sql_query = re.sub(r"\(\s*(%s\s*,\s*)*%s\s*\)", values, sql_query)
+        query_without_enter = " ".join(recovery_sql_query.split())
+        db_file.info(
+            query_without_enter
+        )
         connection.commit()
     except Exception as e:
         logger.error(f"Batch insert failed error={e}")
@@ -123,9 +145,6 @@ def data_commit_batches_wise(sql_query : str, sql_query_value: List[Tuple], batc
     logger.info(
         f"Starting batch processing total_records={len(sql_query_value)}"
     )
-    logger.info(
-        f"Sql query : {sql_query.strip()}"
-    )
     for index in range(0, len(sql_query_value), batch_size):
         batch = sql_query_value[index: index + batch_size]
         thread_obj = Thread(target=fun1, args=(sql_query, batch))
@@ -134,10 +153,7 @@ def data_commit_batches_wise(sql_query : str, sql_query_value: List[Tuple], batc
     for tread_obj in threads:
         tread_obj.join()
     logger.info(f"Completed batch processing threads={len(threads)}")
-
     return len(threads)
-
-
 
 
 
@@ -222,7 +238,7 @@ def insert_data_in_table(list_data : list):
             logger.info(f"Child batches executed count={batch_count}")
             # print("batch size  child : ", batch_count)
         except Exception as e:
-            print(f"batch can not. Error: {e}")
+            print(f"batch can not. Error : ")
 
         cursor.close()
         connection.close()
@@ -236,22 +252,6 @@ def insert_data_in_table(list_data : list):
         print("except error raise ")
     finally:
         connection.close()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
