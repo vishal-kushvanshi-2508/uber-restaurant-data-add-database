@@ -1,5 +1,13 @@
 
 
+
+
+
+
+### note--- delete your log  file .. every time-- before run again program otherwise database log file size
+###            will be incrise more then 152 MB.....
+
+
 from typing import List, Tuple
 import json
 import re
@@ -7,10 +15,10 @@ from threading import Thread
 
 import mysql.connector # Must include .connector
 
+from concurrent_log_handler import ConcurrentRotatingFileHandler
 
 import logging
 
-# formatter
 formatter = logging.Formatter(
     "{lineno} | {asctime} | {name} | {levelname} | {threadName} | {message}",
     style="{"
@@ -19,24 +27,36 @@ formatter = logging.Formatter(
 # -------- Logger 1 --------
 logger = logging.getLogger("uber")
 logger.setLevel(logging.DEBUG)
-uber_handler = logging.FileHandler("uber_logging_file.log", mode="w", encoding="utf-8")
+
+uber_handler = ConcurrentRotatingFileHandler(
+    "uber_logging_file.log",
+    mode="a",
+    # maxBytes=50 * 1024 * 1024,
+    # backupCount=5,
+    encoding="utf-8"
+)
+
 uber_handler.setFormatter(formatter)
 
-logger.addHandler(uber_handler)
-
+if not logger.handlers:
+    logger.addHandler(uber_handler)
 
 # -------- Logger 2 --------
 db_file = logging.getLogger("database")
 db_file.setLevel(logging.DEBUG)
 
-db_handler = logging.FileHandler("database_log_file.log", mode="w", encoding="utf-8")
+db_handler = ConcurrentRotatingFileHandler(
+    "database_log_file.log",
+    mode="a",
+    # maxBytes=50 * 1024 * 1024,
+    # backupCount=5,
+    encoding="utf-8"
+)
+
 db_handler.setFormatter(formatter)
 
-db_file.addHandler(db_handler)
-
-# -------- Test --------
-# logger.info("Uber logger started")
-# db_file.info("Database logger started")
+if not db_file.handlers:
+    db_file.addHandler(db_handler)
 
 
 
@@ -76,28 +96,28 @@ def create_table():
         logger.info("Starting table creation")
         table_queries = {
             "restaurant_detail": """
-                CREATE TABLE IF NOT EXISTS restaurant_detail( 
-                id INT AUTO_INCREMENT PRIMARY KEY, 
-                restaurant_id VARCHAR(300) UNIQUE, 
-                restaurant_name VARCHAR (300), 
-                image_url TEXT, 
-                location TEXT, 
+                CREATE TABLE IF NOT EXISTS restaurant_detail(
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                restaurant_id VARCHAR(300) UNIQUE,
+                restaurant_name VARCHAR (300),
+                image_url TEXT,
+                location TEXT,
                 timeing TEXT );
             """,
             "category_detail": """
-                CREATE TABLE IF NOT EXISTS category_detail( 
-                id INT AUTO_INCREMENT PRIMARY KEY, 
+                CREATE TABLE IF NOT EXISTS category_detail(
+                id INT AUTO_INCREMENT PRIMARY KEY,
                 restaurant_id VARCHAR(100),
-                categories_id VARCHAR(150), 
-                categories_name VARCHAR(150), 
-                item_id VARCHAR(150) UNIQUE , 
-                item_name VARCHAR(150) NOT NULL,  
-                image_url TEXT, 
-                description TEXT , 
+                categories_id VARCHAR(150),
+                categories_name VARCHAR(150),
+                item_id VARCHAR(150) UNIQUE ,
+                item_name VARCHAR(150) NOT NULL,
+                image_url TEXT,
+                description TEXT ,
                 price VARCHAR(170) ,
-                INDEX idx_restaurant_id (restaurant_id), 
+                INDEX idx_restaurant_id (restaurant_id),
                 CONSTRAINT fk_restaurant
-                FOREIGN KEY (restaurant_id) REFERENCES restaurant_detail(restaurant_id) 
+                FOREIGN KEY (restaurant_id) REFERENCES restaurant_detail(restaurant_id)
                 ON DELETE CASCADE  );
             """
         }
@@ -128,11 +148,15 @@ def fun1(sql_query, batch ):
         connection = get_connection()
         cursor = connection.cursor()
         cursor.executemany(sql_query, batch)
+        query_without_enter = " ".join(sql_query.split())
         values = ", ".join(str(t_data) for t_data in batch)
-        recovery_sql_query = re.sub(r"\(\s*(%s\s*,\s*)*%s\s*\)", values, sql_query)
-        query_without_enter = " ".join(recovery_sql_query.split())
-        db_file.info(
+        recovery_sql_query = re.sub(
+            r"\(\s*(%s\s*,\s*)*%s\s*\)",
+            lambda m: values,
             query_without_enter
+        )
+        db_file.info(
+            recovery_sql_query
         )
         connection.commit()
     except Exception as e:
@@ -150,6 +174,8 @@ def data_commit_batches_wise(sql_query : str, sql_query_value: List[Tuple], batc
         thread_obj = Thread(target=fun1, args=(sql_query, batch))
         thread_obj.start()
         threads.append(thread_obj)
+        # thread_obj.join()
+
     for tread_obj in threads:
         tread_obj.join()
     logger.info(f"Completed batch processing threads={len(threads)}")
@@ -179,14 +205,14 @@ def insert_data_in_table(list_data : list):
     parent_sql = """INSERT INTO restaurant_detail
                                 (restaurant_id, restaurant_name, image_url, location, timeing )
                                 VALUES (%s, %s, %s, %s, %s)
-                                ON DUPLICATE KEY UPDATE restaurant_id = restaurant_id"""
+                                ON DUPLICATE KEY UPDATE restaurant_id = restaurant_id;"""
 
     child_sql = """INSERT INTO category_detail
                                    (restaurant_id, categories_id, categories_name, item_id, item_name, image_url, description, price )
                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s )
-                                ON DUPLICATE KEY UPDATE 
+                                ON DUPLICATE KEY UPDATE
                                 item_name = VALUES(item_name),
-                                price = VALUES(price)"""
+                                price = VALUES(price);"""
     try:
         rest_values = []
         menu_values = []
@@ -252,6 +278,8 @@ def insert_data_in_table(list_data : list):
         print("except error raise ")
     finally:
         connection.close()
+
+
 
 
 
